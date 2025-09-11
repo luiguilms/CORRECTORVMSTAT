@@ -1,0 +1,33 @@
+{
+  "name": "vmstat-corrector",
+  "version": "1.0.0",
+  "description": "Corrector de archivos VMSTAT/CPU",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder",
+    "build-win": "electron-builder --win"
+  },
+  "devDependencies": {
+    "electron": "^27.0.0",
+    "electron-builder": "^24.6.4"
+  },
+  "build": {
+    "appId": "com.vmstat.corrector",
+    "productName": "VMSTAT Corrector",
+    "directories": {
+      "output": "dist"
+    },
+    "win": {
+      "target": "nsis",
+      "icon": "icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  },
+  "dependencies": {
+    "repomix": "^1.4.2"
+  }
+}
