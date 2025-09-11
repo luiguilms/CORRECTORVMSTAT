@@ -33,15 +33,23 @@ app.on('activate', () => {
 });
 
 // IPC handlers
-ipcMain.handle('process-file', async (event, filePath) => {
+ipcMain.handle('process-file', async (event, filePath, fileType) => {
     try {
         const content = fs.readFileSync(filePath, 'utf8');
-        const result = correctVmstatFile(content);
+        let result;
+        
+        if (fileType === 'ram') {
+            result = correctVmstatRamFile(content);
+        } else {
+            result = correctVmstatFile(content); // Tu función original para CPU
+        }
+        
         return { 
             success: true, 
             content: result.correctedContent,
             changes: result.changes,
-            stats: result.stats
+            stats: result.stats,
+            fileType: fileType
         };
     } catch (error) {
         return { success: false, error: error.message };
@@ -327,6 +335,234 @@ function isDataLine(line) {
     // Línea que empieza con números y contiene solo números y espacios
     return /^\s*\d+(\s+\d+)*\s*$/.test(trimmed) && 
            !isHeaderLine(line) && 
+           !isDateLine1(line) && 
+           !isDateLine2(line);
+}
+
+function correctVmstatRamFile(content) {
+    const originalLines = content.split('\n').filter(line => line.trim() !== '');
+    const changes = [];
+    let globalLineNumber = 0;
+    
+    // Paso 1: Separar y categorizar todas las líneas
+    const blocks = [];
+    let currentBlock = null;
+    
+    for (let i = 0; i < originalLines.length; i++) {
+        const line = originalLines[i];
+        globalLineNumber++;
+        
+        if (isDateLine1(line)) {
+            if (currentBlock) {
+                blocks.push(currentBlock);
+            }
+            currentBlock = {
+                startLine: globalLineNumber,
+                dateLines: [{ line, originalLine: globalLineNumber }],
+                headerLines: [],
+                dataLines: [],
+                blockNumber: blocks.length + 1
+            };
+        } else if (isDateLine2(line)) {
+            if (currentBlock) {
+                currentBlock.dateLines.push({ line, originalLine: globalLineNumber });
+            } else {
+                currentBlock = {
+                    startLine: globalLineNumber,
+                    dateLines: [{ line, originalLine: globalLineNumber }],
+                    headerLines: [],
+                    dataLines: [],
+                    blockNumber: blocks.length + 1
+                };
+            }
+        } else if (isMemHeaderLine(line)) {
+            if (currentBlock) {
+                currentBlock.headerLines.push({ line, originalLine: globalLineNumber });
+            } else {
+                currentBlock = {
+                    startLine: globalLineNumber,
+                    dateLines: [],
+                    headerLines: [{ line, originalLine: globalLineNumber }],
+                    dataLines: [],
+                    blockNumber: blocks.length + 1
+                };
+            }
+        } else if (isMemDataLine(line)) {
+            if (!currentBlock) {
+                currentBlock = {
+                    startLine: globalLineNumber,
+                    dateLines: [],
+                    headerLines: [],
+                    dataLines: [{ line, originalLine: globalLineNumber }],
+                    blockNumber: blocks.length + 1
+                };
+            } else {
+                currentBlock.dataLines.push({ line, originalLine: globalLineNumber });
+            }
+        }
+    }
+    
+    if (currentBlock) {
+        blocks.push(currentBlock);
+    }
+    
+    // 🔍 ANALIZAR BLOQUES ORIGINALES PARA DETECTAR PROBLEMAS
+    blocks.forEach(block => {
+        const totalLines = block.dateLines.length + block.headerLines.length + block.dataLines.length;
+        
+        // Detectar bloques con estructura incorrecta
+        if (totalLines !== 5) {
+            changes.push({
+                type: 'invalid_structure',
+                blockNumber: block.blockNumber,
+                startLine: block.startLine,
+                expectedLines: 5,
+                actualLines: totalLines,
+                lines: block.dateLines.concat(block.headerLines, block.dataLines)
+            });
+        }
+        
+        // Detectar bloques sin fechas
+        if (block.dateLines.length === 0) {
+            changes.push({
+                type: 'missing_dates',
+                blockNumber: block.blockNumber,
+                startLine: block.startLine,
+                message: 'Bloque sin líneas de fecha'
+            });
+        }
+        
+        // Detectar bloques sin header
+        if (block.headerLines.length === 0) {
+            changes.push({
+                type: 'missing_header',
+                blockNumber: block.blockNumber,
+                startLine: block.startLine,
+                message: 'Bloque sin encabezado de memoria'
+            });
+        }
+        
+        // Detectar bloques sin datos completos (deberían tener 2)
+        if (block.dataLines.length !== 2) {
+            changes.push({
+                type: 'invalid_data_count',
+                blockNumber: block.blockNumber,
+                startLine: block.startLine,
+                expected: 2,
+                actual: block.dataLines.length,
+                dataLines: block.dataLines
+            });
+        }
+    });
+    
+    // Paso 2: Extraer todas las líneas
+    const allDate1Lines = [];
+    const allDate2Lines = [];
+    const allHeaderLines = [];
+    const allDataLines = [];
+    
+    blocks.forEach(block => {
+        allDate1Lines.push(...block.dateLines.filter(d => isDateLine1(d.line)));
+        allDate2Lines.push(...block.dateLines.filter(d => isDateLine2(d.line)));
+        allHeaderLines.push(...block.headerLines);
+        allDataLines.push(...block.dataLines);
+    });
+    
+    // 📊 ESTADÍSTICAS DE REDISTRIBUCIÓN
+    const originalDataCount = blocks.reduce((sum, block) => sum + block.dataLines.length, 0);
+    const originalBlockCount = blocks.length;
+    
+    // Paso 3: Reconstruir bloques (2 fechas + 1 header + 2 datos)
+    const correctedBlocks = [];
+    let date1Index = 0, date2Index = 0, headerIndex = 0, dataIndex = 0;
+    
+    while (date1Index < allDate1Lines.length || 
+           date2Index < allDate2Lines.length || 
+           headerIndex < allHeaderLines.length || 
+           dataIndex < allDataLines.length) {
+        
+        const correctedBlock = {
+            blockNumber: correctedBlocks.length + 1,
+            dateLines: [],
+            headerLines: [],
+            dataLines: []
+        };
+        
+        if (date1Index < allDate1Lines.length) {
+            correctedBlock.dateLines.push(allDate1Lines[date1Index]);
+            date1Index++;
+        }
+        
+        if (date2Index < allDate2Lines.length) {
+            correctedBlock.dateLines.push(allDate2Lines[date2Index]);
+            date2Index++;
+        }
+        
+        if (headerIndex < allHeaderLines.length) {
+            correctedBlock.headerLines.push(allHeaderLines[headerIndex]);
+            headerIndex++;
+        }
+        
+        for (let j = 0; j < 2 && dataIndex < allDataLines.length; j++) {
+            correctedBlock.dataLines.push(allDataLines[dataIndex]);
+            dataIndex++;
+        }
+        
+        correctedBlocks.push(correctedBlock);
+    }
+    
+    // 📈 DETECTAR CAMBIOS DE REDISTRIBUCIÓN
+    if (originalBlockCount !== correctedBlocks.length) {
+        changes.push({
+            type: 'blocks_redistributed',
+            originalBlocks: originalBlockCount,
+            finalBlocks: correctedBlocks.length,
+            message: `Se reorganizaron los bloques de ${originalBlockCount} a ${correctedBlocks.length}`
+        });
+    }
+    
+    // Paso 4: Generar contenido corregido
+    const correctedLines = [];
+    correctedBlocks.forEach(block => {
+        block.dateLines.sort((a, b) => {
+            const aIsDate1 = isDateLine1(a.line);
+            const bIsDate1 = isDateLine1(b.line);
+            return aIsDate1 && !bIsDate1 ? -1 : !aIsDate1 && bIsDate1 ? 1 : 0;
+        });
+        block.dateLines.forEach(date => correctedLines.push(date.line));
+        block.headerLines.forEach(header => correctedLines.push(header.line));
+        block.dataLines.forEach(data => correctedLines.push(data.line));
+    });
+    
+    return {
+        correctedContent: correctedLines.join('\n'),
+        changes: changes, // ✅ Ahora con detalles reales
+        stats: {
+            totalBlocks: correctedBlocks.length,
+            originalBlocks: originalBlockCount,
+            fixedBlocks: changes.length,
+            totalLines: originalLines.length,
+            correctedLines: correctedLines.length,
+            linesRemoved: originalLines.length - correctedLines.length,
+            structure: "2 fechas + 1 header + 2 datos por bloque"
+        }
+    };
+}
+
+function isMemHeaderLine(line) {
+    const trimmed = line.trim();
+    return trimmed.includes('total') && 
+           trimmed.includes('used') && 
+           trimmed.includes('free') &&
+           trimmed.includes('available') &&
+           !trimmed.startsWith('Mem:') &&  // ✅ NO debe empezar con "Mem:"
+           !trimmed.startsWith('Swap:');   // ✅ NO debe empezar con "Swap:"
+}
+
+function isMemDataLine(line) {
+    const trimmed = line.trim();
+    // ✅ SOLO las líneas que empiezan con "Mem:" o "Swap:" son datos
+    return (trimmed.startsWith('Mem:') || trimmed.startsWith('Swap:')) &&
            !isDateLine1(line) && 
            !isDateLine2(line);
 }

@@ -9,6 +9,15 @@
 <body>
     <div class="container">
         <h1>📊 Corrector de Archivos VMSTAT</h1>
+        <!-- Selector de tipo de archivo -->
+    <div class="type-selector">
+        <label>
+            <input type="radio" name="fileType" value="cpu" checked> CPU (Formato complejo)
+        </label>
+        <label>
+            <input type="radio" name="fileType"  value="ram"> RAM (Formato simple)
+        </label>
+    </div>
         
         <div class="upload-section">
             <input type="file" id="fileInput" accept=".txt">

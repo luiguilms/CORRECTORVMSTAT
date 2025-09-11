@@ -24,6 +24,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     processBtn.addEventListener('click', async () => {
         const file = fileInput.files[0];
+        const fileType = document.querySelector('input[name="fileType"]:checked').value;
         if (!file) return;
 
         processBtn.disabled = true;
@@ -32,7 +33,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         try {
             const filePath = file.path;
-            const result = await ipcRenderer.invoke('process-file', filePath);
+            const result = await ipcRenderer.invoke('process-file', filePath, fileType);
 
             if (result.success) {
                 currentFileContent = result.content;
@@ -66,8 +67,15 @@ document.addEventListener('DOMContentLoaded', () => {
             results.appendChild(errorMsg);
         }
     });
-
     function displayResults(result) {
+    if (result.fileType === 'ram') {
+        displayRamResults(result);
+    } else {
+        displayCpuResults(result); // Tu función original renombrada
+    }
+}
+
+    function displayCpuResults(result) {
         const { stats, changes } = result;
         
         let html = `
@@ -192,4 +200,111 @@ document.addEventListener('DOMContentLoaded', () => {
 
         results.innerHTML = html;
     }
+    function displayRamResults(result) {
+    const { stats, changes } = result;
+    
+    let html = `
+        <div class="results-summary">
+            <h4>📊 Resumen del Procesamiento (RAM)</h4>
+            <div class="stats-grid">
+                <div class="stat-item">
+                    <span class="stat-label">Bloques originales:</span>
+                    <span class="stat-value">${stats.originalBlocks}</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-label">Bloques finales:</span>
+                    <span class="stat-value ${stats.totalBlocks !== stats.originalBlocks ? 'changed' : 'unchanged'}">${stats.totalBlocks}</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-label">Problemas detectados:</span>
+                    <span class="stat-value ${changes.length > 0 ? 'changed' : 'unchanged'}">${changes.length}</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-label">Líneas reorganizadas:</span>
+                    <span class="stat-value ${stats.linesRemoved > 0 ? 'changed' : 'unchanged'}">${stats.linesRemoved}</span>
+                </div>
+            </div>
+        </div>
+    `;
+
+    if (changes.length === 0) {
+        html += `
+            <div class="no-changes">
+                ✅ <strong>¡Perfecto!</strong> El archivo RAM ya tiene el formato correcto.<br>
+                Todos los bloques tienen exactamente 5 líneas cada uno.
+            </div>
+        `;
+    } else {
+        html += `
+            <div class="changes-section">
+                <h4>🔧 Problemas Detectados y Corregidos (${changes.length} issues)</h4>
+        `;
+
+        changes.forEach(change => {
+            if (change.type === 'invalid_structure') {
+                html += `
+                    <div class="change-item incomplete">
+                        <div class="change-header incomplete">
+                            <div class="change-title">
+                                <span class="change-icon">❌</span>
+                                <strong>Bloque ${change.blockNumber} - Estructura Inválida</strong>
+                            </div>
+                            <span class="line-info">Línea ${change.startLine}</span>
+                        </div>
+                        <div class="change-details">
+                            <p><strong>Problema:</strong> ${change.actualLines} líneas (deberían ser 5)</p>
+                            <p><strong>Faltan:</strong> ${change.expectedLines - change.actualLines} líneas</p>
+                            <div class="fix-applied">
+                                🔄 Este bloque fue reconstruido durante la reorganización
+                            </div>
+                        </div>
+                    </div>
+                `;
+            } else if (change.type === 'invalid_data_count') {
+                html += `
+                    <div class="change-item incomplete">
+                        <div class="change-header incomplete">
+                            <div class="change-title">
+                                <span class="change-icon">📊</span>
+                                <strong>Bloque ${change.blockNumber} - Datos Incompletos</strong>
+                            </div>
+                            <span class="line-info">Línea ${change.startLine}</span>
+                        </div>
+                        <div class="change-details">
+                            <p><strong>Problema:</strong> ${change.actual} líneas de datos (deberían ser 2)</p>
+                            <p><strong>Faltan:</strong> ${change.expected - change.actual} líneas de datos</p>
+                        </div>
+                    </div>
+                `;
+            } else if (change.type === 'blocks_redistributed') {
+                html += `
+                    <div class="change-item redistribution">
+                        <div class="change-header redistribution">
+                            <div class="change-title">
+                                <span class="change-icon">🔄</span>
+                                <strong>Redistribución de Bloques</strong>
+                            </div>
+                        </div>
+                        <div class="change-details">
+                            <p><strong>Cambio:</strong> ${change.message}</p>
+                            <p><strong>Motivo:</strong> Los bloques originales tenían estructura inconsistente</p>
+                        </div>
+                    </div>
+                `;
+            }
+        });
+
+        html += `</div>`;
+    }
+
+    html += `
+        <div class="completion-message">
+            <strong>✅ Reorganización completada</strong><br>
+            Estructura final: <strong>${stats.structure}</strong><br>
+            Todos los datos se mantienen preservados en el orden correcto.
+        </div>
+    `;
+
+    results.innerHTML = html;
+}
 });

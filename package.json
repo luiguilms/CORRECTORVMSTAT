@@ -1,16 +1,19 @@
 {
   "name": "vmstat-corrector",
   "version": "1.0.0",
-  "description": "Corrector de archivos VMSTAT/CPU",
+  "description": "Corrector de archivos para CPU y RAM",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
     "build": "electron-builder",
-    "build-win": "electron-builder --win"
+    "build-portable": "electron-builder --win portable --x64",
+    "build-installer": "electron-builder --win nsis --x64",
+    "clean": "rm -rf dist"
   },
+  "author": "igs_llupacca",
   "devDependencies": {
     "electron": "^27.0.0",
-    "electron-builder": "^24.6.4"
+    "electron-builder": "^24.13.3"
   },
   "build": {
     "appId": "com.vmstat.corrector",
@@ -18,16 +21,17 @@
     "directories": {
       "output": "dist"
     },
+    "files": [
+      "main.js",
+      "renderer.js", 
+      "index.html",
+      "styles.css",
+      "package.json",
+      "icon.ico"
+    ],
     "win": {
-      "target": "nsis",
+      "target": "portable",
       "icon": "icon.ico"
-    },
-    "nsis": {
-      "oneClick": false,
-      "allowToChangeInstallationDirectory": true
     }
-  },
-  "dependencies": {
-    "repomix": "^1.4.2"
   }
 }
