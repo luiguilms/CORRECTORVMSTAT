@@ -175,8 +175,8 @@ h3 {
     margin-bottom: 20px;
 }
 
-.changes-list {
-    space-y: 15px;
+.changes-list > * + * {
+    margin-top: 15px;
 }
 
 .change-item {
