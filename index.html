@@ -3,41 +3,65 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Corrector de Archivos VMSTAT</title>
+    <title>Corrector de Archivos VMSTAT - Procesamiento por Lotes</title>
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
     <div class="container">
-        <h1>📊 Corrector de Archivos VMSTAT</h1>
-        <!-- Selector de tipo de archivo -->
-    <div class="type-selector">
-        <label>
-            <input type="radio" name="fileType" value="cpu" checked> CPU (Formato complejo)
-        </label>
-        <label>
-            <input type="radio" name="fileType"  value="ram"> RAM (Formato simple)
-        </label>
-    </div>
+        <h1>📊 Corrector de Archivos VMSTAT - Procesamiento por Lotes</h1>
         
-        <div class="upload-section">
-            <input type="file" id="fileInput" accept=".txt">
-            <button id="processBtn" disabled>Procesar Archivo</button>
+        <!-- Selector de tipo de archivo -->
+        <div class="type-selector">
+            <label>
+                <input type="radio" name="fileType" value="cpu" checked> CPU (Formato complejo)
+            </label>
+            <label>
+                <input type="radio" name="fileType" value="ram"> RAM (Formato simple)
+            </label>
+        </div>
+        
+        <!-- Selección de carpeta -->
+        <div class="folder-section">
+            <div class="folder-input">
+                <button id="selectFolderBtn">📁 Seleccionar Carpeta</button>
+                <span id="selectedFolder">Ninguna carpeta seleccionada</span>
+            </div>
+            <button id="scanBtn" disabled>🔍 Escanear Archivos</button>
         </div>
 
-        <div class="info-section">
-            <h3>Información del archivo:</h3>
-            <div id="fileInfo">No se ha seleccionado ningún archivo</div>
-        </div>
-
-        <div class="results-section">
-            <h3>Resultados:</h3>
-            <div id="results">
-                <p>Selecciona un archivo para comenzar</p>
+        <!-- Resultados del escaneo -->
+        <div class="scan-results" id="scanResults" style="display: none;">
+            <h3>Resultados del Escaneo:</h3>
+            <div class="scan-summary" id="scanSummary"></div>
+            <div class="file-categories" id="fileCategories"></div>
+            <div class="batch-actions">
+                <button id="processAllBtn" disabled>⚙️ Procesar Todos los Archivos</button>
+                <button id="processOnlyNeedBtn" disabled>🔧 Procesar Solo los que Necesitan Corrección</button>
             </div>
         </div>
 
-        <div class="download-section" id="downloadSection" style="display: none;">
-            <button id="downloadBtn">Descargar Archivo Corregido</button>
+        <!-- Barra de progreso -->
+        <div class="progress-section" id="progressSection" style="display: none;">
+            <h3>Procesando Archivos:</h3>
+            <div class="progress-bar">
+                <div class="progress-fill" id="progressFill"></div>
+            </div>
+            <div class="progress-info">
+                <span id="progressText">0 / 0 archivos procesados</span>
+                <span id="currentFile"></span>
+            </div>
+            <div class="progress-log" id="progressLog"></div>
+        </div>
+
+        <!-- Resultados finales -->
+        <div class="final-results" id="finalResults" style="display: none;">
+            <h3>Resultados del Procesamiento por Lotes:</h3>
+            <div id="batchSummary"></div>
+            <div id="detailedResults"></div>
+            <div class="completion-actions">
+                <button id="openFolderBtn">📂 Abrir Carpeta de Archivos Corregidos</button>
+                <button id="exportReportBtn">📄 Exportar Reporte</button>
+            </div>
         </div>
     </div>
 

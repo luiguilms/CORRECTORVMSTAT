@@ -1,310 +1,497 @@
 const { ipcRenderer } = require('electron');
 
 document.addEventListener('DOMContentLoaded', () => {
-    const fileInput = document.getElementById('fileInput');
-    const processBtn = document.getElementById('processBtn');
-    const downloadBtn = document.getElementById('downloadBtn');
-    const downloadSection = document.getElementById('downloadSection');
-    const fileInfo = document.getElementById('fileInfo');
-    const results = document.getElementById('results');
+    // Referencias a elementos del DOM
+    const selectFolderBtn = document.getElementById('selectFolderBtn');
+    const selectedFolder = document.getElementById('selectedFolder');
+    const scanBtn = document.getElementById('scanBtn');
+    const scanResults = document.getElementById('scanResults');
+    const scanSummary = document.getElementById('scanSummary');
+    const fileCategories = document.getElementById('fileCategories');
+    const processAllBtn = document.getElementById('processAllBtn');
+    const processOnlyNeedBtn = document.getElementById('processOnlyNeedBtn');
+    const progressSection = document.getElementById('progressSection');
+    const progressFill = document.getElementById('progressFill');
+    const progressText = document.getElementById('progressText');
+    const currentFile = document.getElementById('currentFile');
+    const progressLog = document.getElementById('progressLog');
+    const finalResults = document.getElementById('finalResults');
+    const batchSummary = document.getElementById('batchSummary');
+    const detailedResults = document.getElementById('detailedResults');
+    const openFolderBtn = document.getElementById('openFolderBtn');
+    const exportReportBtn = document.getElementById('exportReportBtn');
 
-    let currentFileContent = '';
+    // Variables globales
+    let currentFolderPath = '';
+    let scanResultsData = null;
+    let batchResultsData = null;
 
-    fileInput.addEventListener('change', (event) => {
-        const file = event.target.files[0];
-        if (file) {
-            fileInfo.innerHTML = `
-                <strong>Archivo:</strong> ${file.name}<br>
-                <strong>Tamaño:</strong> ${(file.size / 1024).toFixed(2)} KB<br>
-                <strong>Última modificación:</strong> ${new Date(file.lastModified).toLocaleString()}
-            `;
-            processBtn.disabled = false;
-        }
+    // Event Listeners
+    selectFolderBtn.addEventListener('click', selectFolder);
+    scanBtn.addEventListener('click', scanFolder);
+    processAllBtn.addEventListener('click', () => processFiles('all'));
+    processOnlyNeedBtn.addEventListener('click', () => processFiles('needed'));
+    openFolderBtn.addEventListener('click', openFolder);
+    exportReportBtn.addEventListener('click', exportReport);
+
+    // Escuchar progreso del procesamiento por lotes
+    ipcRenderer.on('batch-progress', (event, progress) => {
+        updateProgress(progress);
     });
 
-    processBtn.addEventListener('click', async () => {
-        const file = fileInput.files[0];
-        const fileType = document.querySelector('input[name="fileType"]:checked').value;
-        if (!file) return;
-
-        processBtn.disabled = true;
-        processBtn.textContent = 'Procesando...';
-        results.innerHTML = '<div class="processing">🔄 Analizando y redistribuyendo líneas...</div>';
-
+    // Función para seleccionar carpeta
+    async function selectFolder() {
         try {
-            const filePath = file.path;
-            const result = await ipcRenderer.invoke('process-file', filePath, fileType);
-
+            const result = await ipcRenderer.invoke('select-folder');
+            
             if (result.success) {
-                currentFileContent = result.content;
-                displayResults(result);
-                downloadSection.style.display = 'block';
+                currentFolderPath = result.folderPath;
+                selectedFolder.textContent = result.folderPath;
+                scanBtn.disabled = false;
+                resetUI();
             } else {
-                results.innerHTML = `<div class="error">❌ Error: ${result.error}</div>`;
+                selectedFolder.textContent = 'No se seleccionó carpeta';
+                scanBtn.disabled = true;
             }
         } catch (error) {
-            results.innerHTML = `<div class="error">❌ Error: ${error.message}</div>`;
-        } finally {
-            processBtn.disabled = false;
-            processBtn.textContent = 'Procesar Archivo';
+            showError('Error al seleccionar carpeta: ' + error.message);
         }
-    });
-
-    downloadBtn.addEventListener('click', async () => {
-        if (!currentFileContent) return;
-
-        const result = await ipcRenderer.invoke('save-file', currentFileContent);
-        
-        if (result.success) {
-            const successMsg = document.createElement('div');
-            successMsg.className = 'success-save';
-            successMsg.innerHTML = `💾 <strong>Archivo guardado exitosamente:</strong><br>${result.path}`;
-            results.appendChild(successMsg);
-        } else {
-            const errorMsg = document.createElement('div');
-            errorMsg.className = 'error';
-            errorMsg.innerHTML = `❌ <strong>Error al guardar:</strong> ${result.error}`;
-            results.appendChild(errorMsg);
-        }
-    });
-    function displayResults(result) {
-    if (result.fileType === 'ram') {
-        displayRamResults(result);
-    } else {
-        displayCpuResults(result); // Tu función original renombrada
     }
-}
 
-    function displayCpuResults(result) {
-        const { stats, changes } = result;
+    // Función para escanear carpeta
+    async function scanFolder() {
+        const fileType = document.querySelector('input[name="fileType"]:checked').value;
         
-        let html = `
-            <div class="results-summary">
-                <h4>📊 Resumen del Procesamiento</h4>
-                <div class="stats-grid">
-                    <div class="stat-item">
-                        <span class="stat-label">Bloques totales:</span>
-                        <span class="stat-value">${stats.totalBlocks}</span>
-                    </div>
-                    <div class="stat-item">
-                        <span class="stat-label">Bloques reorganizados:</span>
-                        <span class="stat-value ${stats.fixedBlocks > 0 ? 'changed' : 'unchanged'}">${stats.fixedBlocks}</span>
-                    </div>
-                    <div class="stat-item">
-                        <span class="stat-label">Líneas originales:</span>
-                        <span class="stat-value">${stats.totalLines}</span>
-                    </div>
-                    <div class="stat-item">
-                        <span class="stat-label">Líneas finales:</span>
-                        <span class="stat-value">${stats.correctedLines}</span>
-                    </div>
-                </div>
-            </div>
-        `;
+        scanBtn.disabled = true;
+        scanBtn.textContent = 'Escaneando...';
+        resetUI();
 
-        if (changes.length === 0) {
-            html += `
-                <div class="no-changes">
-                    ✅ <strong>¡Perfecto!</strong> El archivo ya tenía el formato correcto.<br>
-                    Todos los bloques tienen exactamente 3 líneas de datos cada uno.
-                </div>
-            `;
-        } else {
-            html += `
-                <div class="changes-section">
-                    <h4>🔄 Redistribución de Datos Realizada (${changes.length} bloques afectados)</h4>
-                    <div class="redistribution-summary">
-                        <p><strong>Problema detectado:</strong> Las líneas de datos estaban distribuidas incorrectamente entre bloques.</p>
-                        <p><strong>Solución aplicada:</strong> Se redistribuyeron automáticamente para asegurar exactamente 3 líneas de datos por bloque.</p>
-                    </div>
-                    <div class="changes-list">
-            `;
-
-            changes.forEach((change, index) => {
-                if (change.type === 'data_redistribution') {
-                    const statusIcon = change.originalDataCount < 3 ? '⬆️' : 
-                                     change.originalDataCount > 3 ? '⬇️' : '🔄';
-                    const statusText = change.originalDataCount < 3 ? 'Recibió líneas' : 
-                                     change.originalDataCount > 3 ? 'Cedió líneas' : 'Intercambió líneas';
-                    
-                    html += `
-                        <div class="change-item redistribution">
-                            <div class="change-header">
-                                <div class="change-title">
-                                    <span class="change-icon">${statusIcon}</span>
-                                    <strong>Bloque ${change.blockNumber}</strong>
-                                    <span class="status-badge">${statusText}</span>
-                                </div>
-                                <span class="line-info">Inicia en línea ${change.startLine}</span>
-                            </div>
-                            <div class="change-details">
-                                <div class="data-count-change">
-                                    <span class="before">Antes: ${change.originalDataCount} líneas</span>
-                                    <span class="arrow">→</span>
-                                    <span class="after">Después: ${change.finalDataCount} líneas</span>
-                                </div>
-                    `;
-                    
-                    if (change.movedLines.removed.length > 0) {
-                        html += `
-                            <div class="moved-section removed">
-                                <h5>📤 Líneas que se movieron a otros bloques:</h5>
-                                <div class="moved-lines">
-                                    ${change.movedLines.removed.map(item => `
-                                        <div class="moved-line">
-                                            <span class="original-line">Línea ${item.originalLine}:</span>
-                                            <code>${item.line}</code>
-                                        </div>
-                                    `).join('')}
-                                </div>
-                            </div>
-                        `;
-                    }
-                    
-                    if (change.movedLines.added.length > 0) {
-                        html += `
-                            <div class="moved-section added">
-                                <h5>📥 Líneas que recibió de otros bloques:</h5>
-                                <div class="moved-lines">
-                                    ${change.movedLines.added.map(item => `
-                                        <div class="moved-line">
-                                            <span class="original-line">Línea ${item.originalLine}:</span>
-                                            <code>${item.line}</code>
-                                        </div>
-                                    `).join('')}
-                                </div>
-                            </div>
-                        `;
-                    }
-                    
-                    html += `
-                            </div>
-                        </div>
-                    `;
-                }
-            });
-
-            html += `
-                    </div>
-                </div>
-            `;
-        }
-
-        html += `
-            <div class="completion-message">
-                <strong>✅ Redistribución completada</strong><br>
-                Ahora cada bloque tiene exactamente 7 líneas (2 fechas + 2 encabezados + 3 datos).<br>
-                El archivo está listo para descargar.
-            </div>
-        `;
-
-        results.innerHTML = html;
-    }
-    function displayRamResults(result) {
-    const { stats, changes } = result;
-    
-    let html = `
-        <div class="results-summary">
-            <h4>📊 Resumen del Procesamiento (RAM)</h4>
-            <div class="stats-grid">
-                <div class="stat-item">
-                    <span class="stat-label">Bloques originales:</span>
-                    <span class="stat-value">${stats.originalBlocks}</span>
-                </div>
-                <div class="stat-item">
-                    <span class="stat-label">Bloques finales:</span>
-                    <span class="stat-value ${stats.totalBlocks !== stats.originalBlocks ? 'changed' : 'unchanged'}">${stats.totalBlocks}</span>
-                </div>
-                <div class="stat-item">
-                    <span class="stat-label">Problemas detectados:</span>
-                    <span class="stat-value ${changes.length > 0 ? 'changed' : 'unchanged'}">${changes.length}</span>
-                </div>
-                <div class="stat-item">
-                    <span class="stat-label">Líneas reorganizadas:</span>
-                    <span class="stat-value ${stats.linesRemoved > 0 ? 'changed' : 'unchanged'}">${stats.linesRemoved}</span>
-                </div>
-            </div>
-        </div>
-    `;
-
-    if (changes.length === 0) {
-        html += `
-            <div class="no-changes">
-                ✅ <strong>¡Perfecto!</strong> El archivo RAM ya tiene el formato correcto.<br>
-                Todos los bloques tienen exactamente 5 líneas cada uno.
-            </div>
-        `;
-    } else {
-        html += `
-            <div class="changes-section">
-                <h4>🔧 Problemas Detectados y Corregidos (${changes.length} issues)</h4>
-        `;
-
-        changes.forEach(change => {
-            if (change.type === 'invalid_structure') {
-                html += `
-                    <div class="change-item incomplete">
-                        <div class="change-header incomplete">
-                            <div class="change-title">
-                                <span class="change-icon">❌</span>
-                                <strong>Bloque ${change.blockNumber} - Estructura Inválida</strong>
-                            </div>
-                            <span class="line-info">Línea ${change.startLine}</span>
-                        </div>
-                        <div class="change-details">
-                            <p><strong>Problema:</strong> ${change.actualLines} líneas (deberían ser 5)</p>
-                            <p><strong>Faltan:</strong> ${change.expectedLines - change.actualLines} líneas</p>
-                            <div class="fix-applied">
-                                🔄 Este bloque fue reconstruido durante la reorganización
-                            </div>
-                        </div>
-                    </div>
-                `;
-            } else if (change.type === 'invalid_data_count') {
-                html += `
-                    <div class="change-item incomplete">
-                        <div class="change-header incomplete">
-                            <div class="change-title">
-                                <span class="change-icon">📊</span>
-                                <strong>Bloque ${change.blockNumber} - Datos Incompletos</strong>
-                            </div>
-                            <span class="line-info">Línea ${change.startLine}</span>
-                        </div>
-                        <div class="change-details">
-                            <p><strong>Problema:</strong> ${change.actual} líneas de datos (deberían ser 2)</p>
-                            <p><strong>Faltan:</strong> ${change.expected - change.actual} líneas de datos</p>
-                        </div>
-                    </div>
-                `;
-            } else if (change.type === 'blocks_redistributed') {
-                html += `
-                    <div class="change-item redistribution">
-                        <div class="change-header redistribution">
-                            <div class="change-title">
-                                <span class="change-icon">🔄</span>
-                                <strong>Redistribución de Bloques</strong>
-                            </div>
-                        </div>
-                        <div class="change-details">
-                            <p><strong>Cambio:</strong> ${change.message}</p>
-                            <p><strong>Motivo:</strong> Los bloques originales tenían estructura inconsistente</p>
-                        </div>
-                    </div>
-                `;
+        try {
+            const result = await ipcRenderer.invoke('scan-folder', currentFolderPath, fileType);
+            
+            if (result.success) {
+                scanResultsData = result.results;
+                displayScanResults(result.results);
+                scanResults.style.display = 'block';
+            } else {
+                showError('Error al escanear carpeta: ' + result.error);
             }
-        });
-
-        html += `</div>`;
+        } catch (error) {
+            showError('Error durante el escaneo: ' + error.message);
+        } finally {
+            scanBtn.disabled = false;
+            scanBtn.textContent = 'Escanear Archivos';
+        }
     }
 
-    html += `
-        <div class="completion-message">
-            <strong>✅ Reorganización completada</strong><br>
-            Estructura final: <strong>${stats.structure}</strong><br>
-            Todos los datos se mantienen preservados en el orden correcto.
-        </div>
-    `;
+    // Función para mostrar resultados del escaneo
+    function displayScanResults(results) {
+        // Resumen del escaneo
+        scanSummary.innerHTML = `
+            <div class="scan-stats">
+                <div class="scan-stat">
+                    <span class="stat-number total">${results.total}</span>
+                    <span class="stat-label">Archivos encontrados</span>
+                </div>
+                <div class="scan-stat">
+                    <span class="stat-number need-correction">${results.needsCorrection.length}</span>
+                    <span class="stat-label">Necesitan corrección</span>
+                </div>
+                <div class="scan-stat">
+                    <span class="stat-number correct">${results.alreadyCorrect.length}</span>
+                    <span class="stat-label">Ya correctos</span>
+                </div>
+                <div class="scan-stat">
+                    <span class="stat-number errors">${results.hasErrors.length}</span>
+                    <span class="stat-label">Con errores</span>
+                </div>
+            </div>
+        `;
 
-    results.innerHTML = html;
-}
+        // Categorías de archivos
+        let categoriesHTML = '';
+
+        if (results.needsCorrection.length > 0) {
+            categoriesHTML += `
+                <div class="file-category needs-correction">
+                    <h4>📋 Archivos que necesitan corrección (${results.needsCorrection.length})</h4>
+                    <div class="file-list">
+                        ${results.needsCorrection.map(file => `
+                            <div class="file-item">
+                                <div class="file-header">
+                                    <span class="file-name">${file.name}</span>
+                                    <span class="file-issues">${file.analysis.issues} problema(s)</span>
+                                </div>
+                                <div class="file-details">
+                                    <span class="file-size">${(file.size / 1024).toFixed(1)} KB</span>
+                                    <span class="file-blocks">${file.analysis.totalBlocks} bloques</span>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            `;
+        }
+
+        if (results.alreadyCorrect.length > 0) {
+            categoriesHTML += `
+                <div class="file-category already-correct">
+                    <h4>✅ Archivos ya correctos (${results.alreadyCorrect.length})</h4>
+                    <div class="file-list collapsed" id="correctFiles">
+                        ${results.alreadyCorrect.map(file => `
+                            <div class="file-item">
+                                <div class="file-header">
+                                    <span class="file-name">${file.name}</span>
+                                    <span class="file-status">Formato correcto</span>
+                                </div>
+                                <div class="file-details">
+                                    <span class="file-size">${(file.size / 1024).toFixed(1)} KB</span>
+                                    <span class="file-blocks">${file.analysis.totalBlocks} bloques</span>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                    <button class="toggle-list" onclick="toggleFileList('correctFiles')">Mostrar/Ocultar archivos</button>
+                </div>
+            `;
+        }
+
+        if (results.hasErrors.length > 0) {
+            categoriesHTML += `
+                <div class="file-category has-errors">
+                    <h4>⚠️ Archivos con errores (${results.hasErrors.length})</h4>
+                    <div class="file-list">
+                        ${results.hasErrors.map(file => `
+                            <div class="file-item error">
+                                <div class="file-header">
+                                    <span class="file-name">${file.name}</span>
+                                    <span class="file-error">Error de formato</span>
+                                </div>
+                                <div class="file-details">
+                                    <span class="error-message">${file.error || file.analysis?.error || 'Error desconocido'}</span>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            `;
+        }
+
+        fileCategories.innerHTML = categoriesHTML;
+
+        // Habilitar botones de procesamiento
+        if (results.total > 0) {
+            processAllBtn.disabled = false;
+        }
+        if (results.needsCorrection.length > 0) {
+            processOnlyNeedBtn.disabled = false;
+        }
+    }
+
+    // Función para procesar archivos
+    async function processFiles(mode) {
+        let filesToProcess = [];
+        
+        if (mode === 'all') {
+            filesToProcess = [
+                ...scanResultsData.needsCorrection,
+                ...scanResultsData.alreadyCorrect
+            ];
+        } else if (mode === 'needed') {
+            filesToProcess = scanResultsData.needsCorrection;
+        }
+
+        if (filesToProcess.length === 0) {
+            showError('No hay archivos para procesar');
+            return;
+        }
+
+        const fileType = document.querySelector('input[name="fileType"]:checked').value;
+
+        // Mostrar sección de progreso
+        progressSection.style.display = 'block';
+        scanResults.style.display = 'none';
+        progressFill.style.width = '0%';
+        progressText.textContent = `0 / ${filesToProcess.length} archivos procesados`;
+        progressLog.innerHTML = '';
+
+        // Deshabilitar botones
+        processAllBtn.disabled = true;
+        processOnlyNeedBtn.disabled = true;
+
+        try {
+            const result = await ipcRenderer.invoke('process-batch', filesToProcess, fileType, currentFolderPath);
+            
+            if (result.success) {
+                batchResultsData = result.results;
+                displayFinalResults(result.results);
+                finalResults.style.display = 'block';
+                progressSection.style.display = 'none';
+            } else {
+                showError('Error durante el procesamiento: ' + result.error);
+            }
+        } catch (error) {
+            showError('Error durante el procesamiento: ' + error.message);
+        }
+    }
+
+    // Función para actualizar progreso
+    function updateProgress(progress) {
+        const percentage = (progress.current / progress.total) * 100;
+        progressFill.style.width = percentage + '%';
+        progressText.textContent = `${progress.current} / ${progress.total} archivos procesados`;
+        currentFile.textContent = `Procesando: ${progress.fileName}`;
+
+        // Agregar entrada al log
+        const logEntry = document.createElement('div');
+        logEntry.className = 'log-entry';
+        logEntry.innerHTML = `
+            <span class="log-time">${new Date().toLocaleTimeString()}</span>
+            <span class="log-file">${progress.fileName}</span>
+            <span class="log-status">Procesando...</span>
+        `;
+        progressLog.appendChild(logEntry);
+        progressLog.scrollTop = progressLog.scrollHeight;
+    }
+
+    // Función para mostrar resultados finales
+    function displayFinalResults(results) {
+        // Resumen del batch
+        const successRate = ((results.successCount / results.totalFiles) * 100).toFixed(1);
+        
+        batchSummary.innerHTML = `
+            <div class="batch-stats">
+                <div class="batch-stat success">
+                    <span class="stat-number">${results.successCount}</span>
+                    <span class="stat-label">Archivos procesados exitosamente</span>
+                </div>
+                <div class="batch-stat errors">
+                    <span class="stat-number">${results.errorCount}</span>
+                    <span class="stat-label">Archivos con errores</span>
+                </div>
+                <div class="batch-stat rate">
+                    <span class="stat-number">${successRate}%</span>
+                    <span class="stat-label">Tasa de éxito</span>
+                </div>
+                <div class="batch-stat total">
+                    <span class="stat-number">${results.totalFiles}</span>
+                    <span class="stat-label">Total procesados</span>
+                </div>
+            </div>
+        `;
+
+        // Resultados detallados
+        let detailedHTML = '';
+
+        if (results.processed.length > 0) {
+            detailedHTML += `
+                <div class="results-category processed">
+                    <h4>✅ Archivos procesados exitosamente (${results.processed.length})</h4>
+                    <div class="processed-files">
+                        ${results.processed.map(result => `
+                            <div class="processed-file">
+                                <div class="file-result-header">
+                                    <div class="original-file">
+                                        <span class="file-icon">📄</span>
+                                        <span class="file-name">${result.originalFile}</span>
+                                    </div>
+                                    <span class="arrow">→</span>
+                                    <div class="corrected-file">
+                                        <span class="file-icon">📄</span>
+                                        <span class="file-name">${result.correctedFile}</span>
+                                    </div>
+                                </div>
+                                <div class="file-result-details">
+                                    <div class="result-stats">
+                                        <span class="stat">Bloques: ${result.stats.totalBlocks}</span>
+                                        <span class="stat">Cambios: ${result.changes.length}</span>
+                                        ${result.changes.length > 0 ? 
+                                            `<span class="stat modified">Modificado</span>` : 
+                                            `<span class="stat unchanged">Sin cambios</span>`
+                                        }
+                                    </div>
+                                    ${result.changes.length > 0 ? `
+                                        <div class="changes-preview">
+                                            <strong>Primeros cambios aplicados:</strong>
+                                            ${result.changes.slice(0, 2).map(change => `
+                                                <div class="change-preview">
+                                                    • ${getChangeDescription(change)}
+                                                </div>
+                                            `).join('')}
+                                            ${result.changes.length > 2 ? `<div class="more-changes">... y ${result.changes.length - 2} cambio(s) más</div>` : ''}
+                                        </div>
+                                    ` : ''}
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            `;
+        }
+
+        if (results.errors.length > 0) {
+            detailedHTML += `
+                <div class="results-category errors">
+                    <h4>⚠️ Archivos con errores (${results.errors.length})</h4>
+                    <div class="error-files">
+                        ${results.errors.map(error => `
+                            <div class="error-file">
+                                <div class="error-header">
+                                    <span class="file-icon">📄</span>
+                                    <span class="file-name">${error.fileName}</span>
+                                    <span class="error-badge">Error</span>
+                                </div>
+                                <div class="error-message">${error.error}</div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            `;
+        }
+
+        detailedResults.innerHTML = detailedHTML;
+
+        // Agregar mensaje de finalización
+        const completionMessage = document.createElement('div');
+        completionMessage.className = 'completion-message';
+        completionMessage.innerHTML = `
+            <h4>🎉 Procesamiento completado</h4>
+            <p>Se procesaron ${results.successCount} archivos exitosamente.</p>
+            <p>Los archivos corregidos se guardaron con el sufijo "_corregido" en la misma carpeta.</p>
+        `;
+        detailedResults.appendChild(completionMessage);
+    }
+
+    // Función auxiliar para describir cambios
+    function getChangeDescription(change) {
+        switch (change.type) {
+            case 'data_redistribution':
+                return `Bloque ${change.blockNumber}: redistribución de datos (${change.originalDataCount} → ${change.finalDataCount} líneas)`;
+            case 'invalid_structure':
+                return `Bloque ${change.blockNumber}: estructura corregida (${change.actualLines} → ${change.expectedLines} líneas)`;
+            case 'invalid_data_count':
+                return `Bloque ${change.blockNumber}: datos corregidos (${change.actual} → ${change.expected} líneas de datos)`;
+            case 'blocks_redistributed':
+                return `Redistribución general: ${change.originalBlocks} → ${change.finalBlocks} bloques`;
+            default:
+                return `Cambio en bloque ${change.blockNumber || 'N/A'}`;
+        }
+    }
+
+    // Función para abrir carpeta
+    async function openFolder() {
+        try {
+            await ipcRenderer.invoke('open-folder', currentFolderPath);
+        } catch (error) {
+            showError('Error al abrir carpeta: ' + error.message);
+        }
+    }
+
+    // Función para exportar reporte
+    async function exportReport() {
+        if (!batchResultsData) {
+            showError('No hay datos para exportar');
+            return;
+        }
+
+        const reportContent = generateReport(batchResultsData);
+        
+        try {
+            const result = await ipcRenderer.invoke('export-report', reportContent);
+            
+            if (result.success) {
+                showSuccess('Reporte exportado exitosamente: ' + result.path);
+            } else {
+                showError('Error al exportar reporte: ' + result.error);
+            }
+        } catch (error) {
+            showError('Error al exportar reporte: ' + error.message);
+        }
+    }
+
+    // Función para generar contenido del reporte
+    function generateReport(results) {
+        const date = new Date().toLocaleString();
+        const fileType = document.querySelector('input[name="fileType"]:checked').value.toUpperCase();
+        
+        let report = `REPORTE DE PROCESAMIENTO VMSTAT - ${fileType}\n`;
+        report += `Fecha y hora: ${date}\n`;
+        report += `Carpeta procesada: ${currentFolderPath}\n`;
+        report += `${'='.repeat(60)}\n\n`;
+
+        report += `RESUMEN GENERAL:\n`;
+        report += `- Total de archivos: ${results.totalFiles}\n`;
+        report += `- Procesados exitosamente: ${results.successCount}\n`;
+        report += `- Con errores: ${results.errorCount}\n`;
+        report += `- Tasa de éxito: ${((results.successCount / results.totalFiles) * 100).toFixed(1)}%\n\n`;
+
+        if (results.processed.length > 0) {
+            report += `ARCHIVOS PROCESADOS EXITOSAMENTE:\n`;
+            report += `${'-'.repeat(40)}\n`;
+            results.processed.forEach(result => {
+                report += `• ${result.originalFile} → ${result.correctedFile}\n`;
+                report += `  Bloques: ${result.stats.totalBlocks}, Cambios aplicados: ${result.changes.length}\n`;
+                if (result.changes.length > 0) {
+                    result.changes.forEach(change => {
+                        report += `    - ${getChangeDescription(change)}\n`;
+                    });
+                }
+                report += `\n`;
+            });
+        }
+
+        if (results.errors.length > 0) {
+            report += `ARCHIVOS CON ERRORES:\n`;
+            report += `${'-'.repeat(20)}\n`;
+            results.errors.forEach(error => {
+                report += `• ${error.fileName}: ${error.error}\n`;
+            });
+            report += `\n`;
+        }
+
+        report += `Reporte generado por VMSTAT Corrector v2.0\n`;
+        
+        return report;
+    }
+
+    // Funciones auxiliares
+    function resetUI() {
+        scanResults.style.display = 'none';
+        progressSection.style.display = 'none';
+        finalResults.style.display = 'none';
+        processAllBtn.disabled = true;
+        processOnlyNeedBtn.disabled = true;
+        scanResultsData = null;
+        batchResultsData = null;
+    }
+
+    function showError(message) {
+        // Crear notificación de error temporal
+        const errorDiv = document.createElement('div');
+        errorDiv.className = 'error-notification';
+        errorDiv.textContent = message;
+        document.body.appendChild(errorDiv);
+        
+        setTimeout(() => {
+            errorDiv.remove();
+        }, 5000);
+    }
+
+    function showSuccess(message) {
+        // Crear notificación de éxito temporal
+        const successDiv = document.createElement('div');
+        successDiv.className = 'success-notification';
+        successDiv.textContent = message;
+        document.body.appendChild(successDiv);
+        
+        setTimeout(() => {
+            successDiv.remove();
+        }, 5000);
+    }
+
+    // Función global para toggle de listas (llamada desde HTML)
+    window.toggleFileList = function(listId) {
+        const list = document.getElementById(listId);
+        list.classList.toggle('collapsed');
+    };
 });

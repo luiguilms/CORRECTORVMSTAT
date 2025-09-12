@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
@@ -32,7 +32,7 @@ app.on('activate', () => {
     }
 });
 
-// IPC handlers
+// IPC handlers originales
 ipcMain.handle('process-file', async (event, filePath, fileType) => {
     try {
         const content = fs.readFileSync(filePath, 'utf8');
@@ -41,7 +41,7 @@ ipcMain.handle('process-file', async (event, filePath, fileType) => {
         if (fileType === 'ram') {
             result = correctVmstatRamFile(content);
         } else {
-            result = correctVmstatFile(content); // Tu función original para CPU
+            result = correctVmstatFile(content);
         }
         
         return { 
@@ -75,6 +75,208 @@ ipcMain.handle('save-file', async (event, content) => {
     }
 });
 
+// NUEVOS IPC handlers para procesamiento por lotes
+ipcMain.handle('select-folder', async () => {
+    try {
+        const result = await dialog.showOpenDialog(mainWindow, {
+            properties: ['openDirectory'],
+            title: 'Seleccionar carpeta con archivos VMSTAT'
+        });
+
+        if (!result.canceled && result.filePaths.length > 0) {
+            return { success: true, folderPath: result.filePaths[0] };
+        }
+        return { success: false, error: 'No se seleccionó carpeta' };
+    } catch (error) {
+        return { success: false, error: error.message };
+    }
+});
+
+ipcMain.handle('scan-folder', async (event, folderPath, fileType) => {
+    try {
+        const files = fs.readdirSync(folderPath)
+            .filter(file => file.toLowerCase().endsWith('.txt'))
+            .map(file => path.join(folderPath, file));
+
+        const results = {
+            needsCorrection: [],
+            alreadyCorrect: [],
+            hasErrors: [],
+            total: files.length
+        };
+
+        for (const filePath of files) {
+            try {
+                const fileName = path.basename(filePath);
+                const content = fs.readFileSync(filePath, 'utf8');
+                
+                let analysisResult;
+                if (fileType === 'ram') {
+                    analysisResult = analyzeVmstatRamFile(content);
+                } else {
+                    analysisResult = analyzeVmstatFile(content);
+                }
+
+                const fileInfo = {
+                    name: fileName,
+                    path: filePath,
+                    size: fs.statSync(filePath).size,
+                    modified: fs.statSync(filePath).mtime,
+                    analysis: analysisResult
+                };
+
+                if (analysisResult.hasErrors) {
+                    results.hasErrors.push(fileInfo);
+                } else if (analysisResult.needsCorrection) {
+                    results.needsCorrection.push(fileInfo);
+                } else {
+                    results.alreadyCorrect.push(fileInfo);
+                }
+            } catch (error) {
+                results.hasErrors.push({
+                    name: path.basename(filePath),
+                    path: filePath,
+                    error: error.message
+                });
+            }
+        }
+
+        return { success: true, results };
+    } catch (error) {
+        return { success: false, error: error.message };
+    }
+});
+
+ipcMain.handle('process-batch', async (event, files, fileType, folderPath) => {
+    try {
+        const results = {
+            processed: [],
+            errors: [],
+            totalFiles: files.length,
+            successCount: 0,
+            errorCount: 0
+        };
+
+        for (let i = 0; i < files.length; i++) {
+            const file = files[i];
+            
+            // Enviar progreso al renderer
+            mainWindow.webContents.send('batch-progress', {
+                current: i + 1,
+                total: files.length,
+                fileName: file.name
+            });
+
+            try {
+                const content = fs.readFileSync(file.path, 'utf8');
+                let correctionResult;
+                
+                if (fileType === 'ram') {
+                    correctionResult = correctVmstatRamFile(content);
+                } else {
+                    correctionResult = correctVmstatFile(content);
+                }
+
+                // Generar nombre del archivo corregido
+                const originalName = path.basename(file.path, '.txt');
+                const correctedFileName = `${originalName}_corregido.txt`;
+                const correctedFilePath = path.join(folderPath, correctedFileName);
+
+                // Guardar archivo corregido
+                fs.writeFileSync(correctedFilePath, correctionResult.correctedContent, 'utf8');
+
+                results.processed.push({
+                    originalFile: file.name,
+                    correctedFile: correctedFileName,
+                    changes: correctionResult.changes,
+                    stats: correctionResult.stats
+                });
+                results.successCount++;
+
+            } catch (error) {
+                results.errors.push({
+                    fileName: file.name,
+                    error: error.message
+                });
+                results.errorCount++;
+            }
+        }
+
+        return { success: true, results };
+    } catch (error) {
+        return { success: false, error: error.message };
+    }
+});
+
+ipcMain.handle('open-folder', async (event, folderPath) => {
+    try {
+        await shell.openPath(folderPath);
+        return { success: true };
+    } catch (error) {
+        return { success: false, error: error.message };
+    }
+});
+
+ipcMain.handle('export-report', async (event, reportContent) => {
+    try {
+        const { filePath } = await dialog.showSaveDialog(mainWindow, {
+            defaultPath: `reporte_vmstat_${new Date().toISOString().split('T')[0]}.txt`,
+            filters: [
+                { name: 'Text Files', extensions: ['txt'] },
+                { name: 'All Files', extensions: ['*'] }
+            ]
+        });
+
+        if (filePath) {
+            fs.writeFileSync(filePath, reportContent, 'utf8');
+            return { success: true, path: filePath };
+        }
+        return { success: false, error: 'No se seleccionó archivo' };
+    } catch (error) {
+        return { success: false, error: error.message };
+    }
+});
+
+// FUNCIONES DE ANÁLISIS (antes de procesar)
+function analyzeVmstatFile(content) {
+    try {
+        const result = correctVmstatFile(content);
+        return {
+            needsCorrection: result.changes.length > 0,
+            hasErrors: false,
+            issues: result.changes.length,
+            totalBlocks: result.stats.totalBlocks,
+            preview: result.changes.slice(0, 3) // Primeros 3 cambios para vista previa
+        };
+    } catch (error) {
+        return {
+            needsCorrection: false,
+            hasErrors: true,
+            error: error.message
+        };
+    }
+}
+
+function analyzeVmstatRamFile(content) {
+    try {
+        const result = correctVmstatRamFile(content);
+        return {
+            needsCorrection: result.changes.length > 0,
+            hasErrors: false,
+            issues: result.changes.length,
+            totalBlocks: result.stats.totalBlocks,
+            preview: result.changes.slice(0, 3)
+        };
+    } catch (error) {
+        return {
+            needsCorrection: false,
+            hasErrors: true,
+            error: error.message
+        };
+    }
+}
+
+// Funciones originales de corrección (sin cambios)
 function correctVmstatFile(content) {
     const originalLines = content.split('\n').filter(line => line.trim() !== '');
     const changes = [];
@@ -271,74 +473,6 @@ function correctVmstatFile(content) {
     };
 }
 
-function hasDataMoved(originalData, newData) {
-    if (originalData.length !== newData.length) return true;
-    
-    for (let i = 0; i < originalData.length; i++) {
-        if (originalData[i].originalLine !== newData[i].originalLine) {
-            return true;
-        }
-    }
-    return false;
-}
-
-function getMovedLines(originalData, newData) {
-    const moved = {
-        removed: [],
-        added: []
-    };
-    
-    // Líneas que estaban en el bloque original pero ya no están
-    const newOriginalLines = newData.map(item => item.originalLine);
-    originalData.forEach(item => {
-        if (!newOriginalLines.includes(item.originalLine)) {
-            moved.removed.push({
-                line: item.line,
-                originalLine: item.originalLine
-            });
-        }
-    });
-    
-    // Líneas que no estaban en el bloque original pero ahora sí están
-    const originalOriginalLines = originalData.map(item => item.originalLine);
-    newData.forEach(item => {
-        if (!originalOriginalLines.includes(item.originalLine)) {
-            moved.added.push({
-                line: item.line,
-                originalLine: item.originalLine
-            });
-        }
-    });
-    
-    return moved;
-}
-
-function isDateLine1(line) {
-    return /^\d{2}\/\d{2}\/\d{4}_\d{2}:\d{2}:\d{2}$/.test(line.trim());
-}
-
-function isDateLine2(line) {
-    return /^(Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+\w+\s+\d+\s+\d{2}:\d{2}:\d{2}\s+-\d{2}\s+\d{4}$/.test(line.trim());
-}
-
-function isHeaderLine(line) {
-    const trimmed = line.trim();
-    return trimmed.includes('procs') || 
-           trimmed.includes('memory') || 
-           trimmed.includes('swap') || 
-           trimmed.includes('cpu') ||
-           trimmed.includes('r  b');
-}
-
-function isDataLine(line) {
-    const trimmed = line.trim();
-    // Línea que empieza con números y contiene solo números y espacios
-    return /^\s*\d+(\s+\d+)*\s*$/.test(trimmed) && 
-           !isHeaderLine(line) && 
-           !isDateLine1(line) && 
-           !isDateLine2(line);
-}
-
 function correctVmstatRamFile(content) {
     const originalLines = content.split('\n').filter(line => line.trim() !== '');
     const changes = [];
@@ -406,11 +540,10 @@ function correctVmstatRamFile(content) {
         blocks.push(currentBlock);
     }
     
-    // 🔍 ANALIZAR BLOQUES ORIGINALES PARA DETECTAR PROBLEMAS
+    // Analizar bloques originales para detectar problemas
     blocks.forEach(block => {
         const totalLines = block.dateLines.length + block.headerLines.length + block.dataLines.length;
         
-        // Detectar bloques con estructura incorrecta
         if (totalLines !== 5) {
             changes.push({
                 type: 'invalid_structure',
@@ -422,7 +555,6 @@ function correctVmstatRamFile(content) {
             });
         }
         
-        // Detectar bloques sin fechas
         if (block.dateLines.length === 0) {
             changes.push({
                 type: 'missing_dates',
@@ -432,7 +564,6 @@ function correctVmstatRamFile(content) {
             });
         }
         
-        // Detectar bloques sin header
         if (block.headerLines.length === 0) {
             changes.push({
                 type: 'missing_header',
@@ -442,7 +573,6 @@ function correctVmstatRamFile(content) {
             });
         }
         
-        // Detectar bloques sin datos completos (deberían tener 2)
         if (block.dataLines.length !== 2) {
             changes.push({
                 type: 'invalid_data_count',
@@ -468,7 +598,6 @@ function correctVmstatRamFile(content) {
         allDataLines.push(...block.dataLines);
     });
     
-    // 📊 ESTADÍSTICAS DE REDISTRIBUCIÓN
     const originalDataCount = blocks.reduce((sum, block) => sum + block.dataLines.length, 0);
     const originalBlockCount = blocks.length;
     
@@ -511,7 +640,6 @@ function correctVmstatRamFile(content) {
         correctedBlocks.push(correctedBlock);
     }
     
-    // 📈 DETECTAR CAMBIOS DE REDISTRIBUCIÓN
     if (originalBlockCount !== correctedBlocks.length) {
         changes.push({
             type: 'blocks_redistributed',
@@ -536,7 +664,7 @@ function correctVmstatRamFile(content) {
     
     return {
         correctedContent: correctedLines.join('\n'),
-        changes: changes, // ✅ Ahora con detalles reales
+        changes: changes,
         stats: {
             totalBlocks: correctedBlocks.length,
             originalBlocks: originalBlockCount,
@@ -549,19 +677,71 @@ function correctVmstatRamFile(content) {
     };
 }
 
+// Funciones auxiliares (sin cambios)
+function hasDataMoved(originalData, newData) {
+    if (originalData.length !== newData.length) return true;
+    for (let i = 0; i < originalData.length; i++) {
+        if (originalData[i].originalLine !== newData[i].originalLine) {
+            return true;
+        }
+    }
+    return false;
+}
+
+function getMovedLines(originalData, newData) {
+    const moved = { removed: [], added: [] };
+    const newOriginalLines = newData.map(item => item.originalLine);
+    originalData.forEach(item => {
+        if (!newOriginalLines.includes(item.originalLine)) {
+            moved.removed.push({ line: item.line, originalLine: item.originalLine });
+        }
+    });
+    const originalOriginalLines = originalData.map(item => item.originalLine);
+    newData.forEach(item => {
+        if (!originalOriginalLines.includes(item.originalLine)) {
+            moved.added.push({ line: item.line, originalLine: item.originalLine });
+        }
+    });
+    return moved;
+}
+
+function isDateLine1(line) {
+    return /^\d{2}\/\d{2}\/\d{4}_\d{2}:\d{2}:\d{2}$/.test(line.trim());
+}
+
+function isDateLine2(line) {
+    return /^(Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+\w+\s+\d+\s+\d{2}:\d{2}:\d{2}\s+-\d{2}\s+\d{4}$/.test(line.trim());
+}
+
+function isHeaderLine(line) {
+    const trimmed = line.trim();
+    return trimmed.includes('procs') || 
+           trimmed.includes('memory') || 
+           trimmed.includes('swap') || 
+           trimmed.includes('cpu') ||
+           trimmed.includes('r  b');
+}
+
+function isDataLine(line) {
+    const trimmed = line.trim();
+    return /^\s*\d+(\s+\d+)*\s*$/.test(trimmed) && 
+           !isHeaderLine(line) && 
+           !isDateLine1(line) && 
+           !isDateLine2(line);
+}
+
 function isMemHeaderLine(line) {
     const trimmed = line.trim();
     return trimmed.includes('total') && 
            trimmed.includes('used') && 
            trimmed.includes('free') &&
            trimmed.includes('available') &&
-           !trimmed.startsWith('Mem:') &&  // ✅ NO debe empezar con "Mem:"
-           !trimmed.startsWith('Swap:');   // ✅ NO debe empezar con "Swap:"
+           !trimmed.startsWith('Mem:') &&
+           !trimmed.startsWith('Swap:');
 }
 
 function isMemDataLine(line) {
     const trimmed = line.trim();
-    // ✅ SOLO las líneas que empiezan con "Mem:" o "Swap:" son datos
     return (trimmed.startsWith('Mem:') || trimmed.startsWith('Swap:')) &&
            !isDateLine1(line) && 
            !isDateLine2(line);
