@@ -364,19 +364,21 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Función auxiliar para describir cambios
     function getChangeDescription(change) {
-        switch (change.type) {
-            case 'data_redistribution':
-                return `Bloque ${change.blockNumber}: redistribución de datos (${change.originalDataCount} → ${change.finalDataCount} líneas)`;
-            case 'invalid_structure':
-                return `Bloque ${change.blockNumber}: estructura corregida (${change.actualLines} → ${change.expectedLines} líneas)`;
-            case 'invalid_data_count':
-                return `Bloque ${change.blockNumber}: datos corregidos (${change.actual} → ${change.expected} líneas de datos)`;
-            case 'blocks_redistributed':
-                return `Redistribución general: ${change.originalBlocks} → ${change.finalBlocks} bloques`;
-            default:
-                return `Cambio en bloque ${change.blockNumber || 'N/A'}`;
-        }
+    const lineInfo = change.affectedLines ? ` (${change.affectedLines})` : '';
+    
+    switch (change.type) {
+        case 'data_redistribution':
+            return `Bloque ${change.blockNumber}${lineInfo}: redistribución de datos (${change.originalDataCount} → ${change.finalDataCount} líneas)`;
+        case 'invalid_structure':
+            return `Bloque ${change.blockNumber}${lineInfo}: estructura corregida (${change.actualLines} → ${change.expectedLines} líneas)`;
+        case 'invalid_data_count':
+            return `Bloque ${change.blockNumber}${lineInfo}: datos corregidos (${change.actual} → ${change.expected} líneas de datos)`;
+        case 'blocks_redistributed':
+            return `Redistribución general: ${change.originalBlocks} → ${change.finalBlocks} bloques`;
+        default:
+            return `Cambio en bloque ${change.blockNumber || 'N/A'}${lineInfo}`;
     }
+}
 
     // Función para abrir carpeta
     async function openFolder() {
