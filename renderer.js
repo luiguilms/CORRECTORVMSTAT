@@ -151,7 +151,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             </div>
                         `).join('')}
                     </div>
-                    <button class="toggle-list" onclick="toggleFileList('correctFiles')">Mostrar/Ocultar archivos</button>
+                    <button class="toggle-list" data-target="correctFiles">Mostrar/Ocultar archivos</button>
                 </div>
             `;
         }
@@ -490,8 +490,14 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // Función global para toggle de listas (llamada desde HTML)
-    window.toggleFileList = function(listId) {
-        const list = document.getElementById(listId);
-        list.classList.toggle('collapsed');
-    };
+    // Y en JavaScript:
+document.addEventListener('click', (e) => {
+    if (e.target.classList.contains('toggle-list')) {
+        const targetId = e.target.getAttribute('data-target');
+        const list = document.getElementById(targetId);
+        if (list) {
+            list.classList.toggle('collapsed');
+        }
+    }
+});
 });
