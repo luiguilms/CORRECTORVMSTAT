@@ -178,11 +178,8 @@ ipcMain.handle("process-batch", async (event, files, fileType, folderPath) => {
           correctionResult = correctVmstatFile(content);
         }
 
-        // Generar nombre del archivo corregido
-        const originalName = path.basename(file.path, ".txt");
-        const correctedFileName = `${originalName}_corregido.txt`;
-        const correctedFilePath = path.join(folderPath, correctedFileName);
-
+        // Usar el nombre original (sobrescribir)
+        const correctedFilePath = file.path;
         // Guardar archivo corregido
         fs.writeFileSync(
           correctedFilePath,
@@ -192,7 +189,7 @@ ipcMain.handle("process-batch", async (event, files, fileType, folderPath) => {
 
         results.processed.push({
           originalFile: file.name,
-          correctedFile: correctedFileName,
+          correctedFile: file.name,
           changes: correctionResult.changes,
           stats: correctionResult.stats,
         });
@@ -475,9 +472,26 @@ function correctVmstatFile(content) {
 
   // Paso 5: Generar contenido corregido
   const correctedLines = [];
+  // Extraer todas las fechas por tipo
+  const allDate1 = [];
+  const allDate2 = [];
   correctedBlocks.forEach((block) => {
-    // 1. Fechas (ambos tipos)
-    block.dateLines.forEach((date) => correctedLines.push(date.line));
+    block.dateLines.forEach((date) => {
+      if (isDateLine1(date.line)) allDate1.push(date.line);
+      if (isDateLine2(date.line)) allDate2.push(date.line);
+    });
+  });
+
+  correctedBlocks.forEach((block, index) => {
+    // 1. Una fecha tipo 1 si existe
+    if (index < allDate1.length) {
+      correctedLines.push(allDate1[index]);
+    }
+
+    // 2. Una fecha tipo 2 si existe
+    if (index < allDate2.length) {
+      correctedLines.push(allDate2[index]);
+    }
 
     // 2. Encabezados (solo si existen y sin duplicados)
     const uniqueHeaders = [];
@@ -586,52 +600,60 @@ function correctVmstatRamFile(content) {
       block.dataLines.length;
 
     if (totalLines !== 5) {
-    changes.push({
-        type: 'invalid_structure',
+      changes.push({
+        type: "invalid_structure",
         blockNumber: block.blockNumber,
         startLine: block.startLine,
         endLine: block.startLine + totalLines - 1,
         expectedLines: 5,
         actualLines: totalLines,
         lines: block.dateLines.concat(block.headerLines, block.dataLines),
-        affectedLines: `Líneas ${block.startLine} - ${block.startLine + totalLines - 1}`
-    });
-}
+        affectedLines: `Líneas ${block.startLine} - ${
+          block.startLine + totalLines - 1
+        }`,
+      });
+    }
 
     if (block.dateLines.length === 0) {
-    changes.push({
-        type: 'missing_dates',
+      changes.push({
+        type: "missing_dates",
         blockNumber: block.blockNumber,
         startLine: block.startLine,
         endLine: block.startLine + totalLines - 1,
-        message: 'Bloque sin líneas de fecha',
-        affectedLines: `Líneas ${block.startLine} - ${block.startLine + totalLines - 1}`
-    });
-}
+        message: "Bloque sin líneas de fecha",
+        affectedLines: `Líneas ${block.startLine} - ${
+          block.startLine + totalLines - 1
+        }`,
+      });
+    }
 
     if (block.headerLines.length === 0) {
-    changes.push({
-        type: 'missing_header',
+      changes.push({
+        type: "missing_header",
         blockNumber: block.blockNumber,
         startLine: block.startLine,
         endLine: block.startLine + totalLines - 1,
-        message: 'Bloque sin encabezado de memoria',
-        affectedLines: `Líneas ${block.startLine} - ${block.startLine + totalLines - 1}`
-    });
-}
+        message: "Bloque sin encabezado de memoria",
+        affectedLines: `Líneas ${block.startLine} - ${
+          block.startLine + totalLines - 1
+        }`,
+      });
+    }
 
     if (block.dataLines.length !== 2) {
-    changes.push({
-        type: 'invalid_data_count',
+      changes.push({
+        type: "invalid_data_count",
         blockNumber: block.blockNumber,
         startLine: block.startLine,
         endLine: block.startLine + totalLines - 1,
         expected: 2,
         actual: block.dataLines.length,
         dataLines: block.dataLines,
-        affectedLines: `Líneas ${block.startLine} - ${block.startLine + totalLines - 1}`
-    });
-}
+        affectedLines: `Líneas ${block.startLine} - ${
+          block.startLine + totalLines - 1
+        }`,
+      });
+    }
   });
 
   // Paso 2: Extraer todas las líneas
@@ -698,13 +720,13 @@ function correctVmstatRamFile(content) {
 
   if (originalBlockCount !== correctedBlocks.length) {
     changes.push({
-        type: 'blocks_redistributed',
-        originalBlocks: originalBlockCount,
-        finalBlocks: correctedBlocks.length,
-        message: `Se reorganizaron los bloques de ${originalBlockCount} a ${correctedBlocks.length}`,
-        affectedLines: `Archivo completo`
+      type: "blocks_redistributed",
+      originalBlocks: originalBlockCount,
+      finalBlocks: correctedBlocks.length,
+      message: `Se reorganizaron los bloques de ${originalBlockCount} a ${correctedBlocks.length}`,
+      affectedLines: `Archivo completo`,
     });
-}
+  }
 
   // Paso 4: Generar contenido corregido
   const correctedLines = [];
