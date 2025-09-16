@@ -279,14 +279,6 @@ button:disabled {
     padding: 15px 30px;
 }
 
-#processAllBtn {
-    background-color: #17a2b8;
-}
-
-#processAllBtn:hover:not(:disabled) {
-    background-color: #138496;
-}
-
 #processOnlyNeedBtn {
     background-color: #28a745;
 }
