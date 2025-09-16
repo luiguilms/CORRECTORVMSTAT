@@ -20,6 +20,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const detailedResults = document.getElementById('detailedResults');
     const openFolderBtn = document.getElementById('openFolderBtn');
     const exportReportBtn = document.getElementById('exportReportBtn');
+    const processOnlyNeedReplaceBtn = document.getElementById('processOnlyNeedReplaceBtn');
 
     // Variables globales
     let currentFolderPath = '';
@@ -33,6 +34,7 @@ document.addEventListener('DOMContentLoaded', () => {
     processOnlyNeedBtn.addEventListener('click', () => processFiles('needed'));
     openFolderBtn.addEventListener('click', openFolder);
     exportReportBtn.addEventListener('click', exportReport);
+    processOnlyNeedReplaceBtn.addEventListener('click', () => processFiles('needed', true));
 
     // Escuchar progreso del procesamiento por lotes
     ipcRenderer.on('batch-progress', (event, progress) => {
@@ -185,11 +187,12 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         if (results.needsCorrection.length > 0) {
             processOnlyNeedBtn.disabled = false;
+            processOnlyNeedReplaceBtn.disabled = false;
         }
     }
 
     // Función para procesar archivos
-    async function processFiles(mode) {
+    async function processFiles(mode, replaceOriginal = false) {
         let filesToProcess = [];
         
         if (mode === 'all') {
@@ -220,7 +223,7 @@ document.addEventListener('DOMContentLoaded', () => {
         processOnlyNeedBtn.disabled = true;
 
         try {
-            const result = await ipcRenderer.invoke('process-batch', filesToProcess, fileType, currentFolderPath);
+            const result = await ipcRenderer.invoke('process-batch', filesToProcess, fileType, currentFolderPath, replaceOriginal);
             
             if (result.success) {
                 batchResultsData = result.results;

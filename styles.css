@@ -271,6 +271,7 @@ button:disabled {
     background: white;
     border-radius: 8px;
     border: 1px solid #dee2e6;
+    flex-wrap: wrap;
 }
 
 .batch-actions button {
@@ -744,4 +745,11 @@ button:disabled {
 @keyframes spin {
     0% { transform: translate(-50%, -50%) rotate(0deg); }
     100% { transform: translate(-50%, -50%) rotate(360deg); }
+}
+#processOnlyNeedReplaceBtn {
+    background-color: #dc3545;
+}
+
+#processOnlyNeedReplaceBtn:hover:not(:disabled) {
+    background-color: #c82333;
 }

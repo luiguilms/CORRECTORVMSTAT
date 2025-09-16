@@ -148,7 +148,7 @@ ipcMain.handle("scan-folder", async (event, folderPath, fileType) => {
   }
 });
 
-ipcMain.handle("process-batch", async (event, files, fileType, folderPath) => {
+ipcMain.handle("process-batch", async (event, files, fileType, folderPath, replaceOriginal = false) => {
   try {
     const results = {
       processed: [],
@@ -178,8 +178,17 @@ ipcMain.handle("process-batch", async (event, files, fileType, folderPath) => {
           correctionResult = correctVmstatFile(content);
         }
 
-        // Usar el nombre original (sobrescribir)
-        const correctedFilePath = file.path;
+        let correctedFilePath;
+let correctedFileName;
+
+if (replaceOriginal) {
+  correctedFilePath = file.path;
+  correctedFileName = file.name;
+} else {
+  const originalName = path.basename(file.path, ".txt");
+  correctedFileName = `${originalName}_corregido.txt`;
+  correctedFilePath = path.join(folderPath, correctedFileName);
+}
         // Guardar archivo corregido
         fs.writeFileSync(
           correctedFilePath,
@@ -189,7 +198,7 @@ ipcMain.handle("process-batch", async (event, files, fileType, folderPath) => {
 
         results.processed.push({
           originalFile: file.name,
-          correctedFile: file.name,
+          correctedFile: correctedFileName,
           changes: correctionResult.changes,
           stats: correctionResult.stats,
         });
